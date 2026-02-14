@@ -3,8 +3,6 @@ from sqlalchemy.orm import Session
 import uuid
 import boto3
 from app.core.config import settings
-from fastapi import Query
-from app.services.s3 import generate_presigned_upload_url
 
 
 from app.db.session import get_db
@@ -196,37 +194,62 @@ def chat_with_well(
 
     return {"answer": answer, "conversation_id": conv_id}
 
-@router.post("/presign-upload")
-def presign_upload(filename: str = Query(...)):
-    s3_key = f"las/{uuid.uuid4()}-{filename}"
+from fastapi import APIRouter, UploadFile, File, Depends, BackgroundTasks, HTTPException
+from sqlalchemy.orm import Session
+from pydantic import BaseModel # <--- Import this
+import uuid
+import boto3
+from app.core.config import settings
 
-    upload_url = generate_presigned_upload_url(
-        bucket_name="one-geo-assignment-las-files",
-        key=s3_key,
-        content_type="application/octet-stream",
-    )
+# ... (keep your existing imports and other endpoints) ...
 
-    return {
-        "upload_url": upload_url,
-        "s3_key": s3_key,
-    }
-
-
-from pydantic import BaseModel
-
+# 1. Create a Schema for the Confirm Upload Body
 class ConfirmUploadRequest(BaseModel):
     s3_key: str
 
+@router.post("/presign-upload")
+def presign_upload(filename: str):
+    # Sanitize filename to prevent issues with spaces/special chars in S3
+    safe_filename = filename.replace(" ", "_")
+    
+    s3 = boto3.client(
+        "s3",
+        aws_access_key_id=settings.AWS_ACCESS_KEY_ID,
+        aws_secret_access_key=settings.AWS_SECRET_ACCESS_KEY,
+        region_name=settings.AWS_REGION,
+    )
+
+    s3_key = f"las/{uuid.uuid4()}-{safe_filename}"
+
+    try:
+        url = s3.generate_presigned_url(
+            ClientMethod="put_object",
+            Params={
+                "Bucket": settings.S3_BUCKET_NAME,
+                "Key": s3_key,
+                "ContentType": "application/octet-stream",
+            },
+            ExpiresIn=300,  # 5 minutes
+        )
+    except Exception as e:
+        print(f"S3 Error: {e}")
+        raise HTTPException(status_code=500, detail="Could not generate presigned URL")
+
+    return {
+        "upload_url": url,
+        "s3_key": s3_key,
+    }
+
 @router.post("/confirm-upload")
 def confirm_upload(
-    body: ConfirmUploadRequest,
+    body: ConfirmUploadRequest, # <--- Use the Pydantic Model here
     background_tasks: BackgroundTasks,
     db: Session = Depends(get_db),
 ):
+    # Access the data using body.s3_key
     well = Well(
         s3_key=body.s3_key,
         is_ready=False,
-        progress=0,
     )
     db.add(well)
     db.commit()
