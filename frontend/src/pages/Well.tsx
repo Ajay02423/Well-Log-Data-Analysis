@@ -24,10 +24,6 @@ const Well: React.FC<WellProps> = ({ initialWellId = null, onWellIdChange, onDat
   const [maxDepth, setMaxDepth] = useState<number>(0);
   
   // Viewer State
-  const [selectedCurves, setSelectedCurves] = useState<string[]>([]);
-  const [fromDepth, setFromDepth] = useState<number>(0);
-  const [toDepth, setToDepth] = useState<number>(0);
-
   useEffect(() => {
     if (!wellId) return;
 
@@ -50,8 +46,6 @@ const Well: React.FC<WellProps> = ({ initialWellId = null, onWellIdChange, onDat
         setCurves(curvesRes.data);
         setMinDepth(depthRes.data.min_depth);
         setMaxDepth(depthRes.data.max_depth);
-        setFromDepth(depthRes.data.min_depth);
-        setToDepth(depthRes.data.max_depth);
         setReady(true);
         
         // NEW: Inform Parent (App.tsx) that data is ready
@@ -147,13 +141,8 @@ const Well: React.FC<WellProps> = ({ initialWellId = null, onWellIdChange, onDat
               availableCurves={curves}
               minDepth={minDepth}
               maxDepth={maxDepth}
-              selectedCurves={selectedCurves}
-              setSelectedCurves={setSelectedCurves}
-              fromDepth={fromDepth}
-              toDepth={toDepth}
-              setFromDepth={setFromDepth}
-              setToDepth={setToDepth}
             />
+
         </div>
       )}
     </div>

@@ -142,11 +142,17 @@ const LogViewer: React.FC<Props> = ({
         <Plot
           data={traces as any}
           layout={{
-            title: "Well Logs vs Depth",
-            yaxis: { autorange: "reversed", title: "Depth" },
-            xaxis: { title: "Value" },
+            title: { text: "Well Logs vs Depth" },
+            yaxis: {
+              autorange: "reversed",
+              title: { text: "Depth" },
+            },
+            xaxis: {
+              title: { text: "Value" },
+            },
             height: 600,
           }}
+
           style={{ width: "100%" }}
           useResizeHandler
         />
