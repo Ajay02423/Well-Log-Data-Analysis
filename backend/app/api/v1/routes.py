@@ -1,6 +1,9 @@
 from fastapi import APIRouter, UploadFile, File, Depends, BackgroundTasks
 from sqlalchemy.orm import Session
 import uuid
+import boto3
+from app.core.config import settings
+
 
 from app.db.session import get_db
 from app.models.well import Well
@@ -21,39 +24,6 @@ from app.services.llm_helper import generate_interpretation_text
 from app.schemas.interpret import InterpretRequest, InterpretResponse
 
 router = APIRouter()
-
-
-# ===============================
-# Upload LAS (non-blocking)
-# ===============================
-@router.post("/upload-las")
-def upload_las(
-    background_tasks: BackgroundTasks,
-    file: UploadFile = File(...),
-    db: Session = Depends(get_db),
-):
-    s3_key = f"las/{uuid.uuid4()}.las"
-    upload_file(file.file, s3_key)
-
-    well = Well(
-        s3_key=s3_key,
-        is_ready=False,
-    )
-    db.add(well)
-    db.commit()
-    db.refresh(well)
-
-    background_tasks.add_task(
-        ingest_las_background,
-        s3_key,
-        well.id,
-    )
-
-    return {
-        "well_id": str(well.id),
-        "status": "processing",
-    }
-
 
 # ===============================
 # List all wells
@@ -223,3 +193,54 @@ def chat_with_well(
     )
 
     return {"answer": answer, "conversation_id": conv_id}
+
+@router.post("/presign-upload")
+def presign_upload(filename: str):
+    s3 = boto3.client(
+        "s3",
+        aws_access_key_id=settings.AWS_ACCESS_KEY_ID,
+        aws_secret_access_key=settings.AWS_SECRET_ACCESS_KEY,
+        region_name=settings.AWS_REGION,
+    )
+
+    s3_key = f"las/{uuid.uuid4()}-{filename}"
+
+    url = s3.generate_presigned_url(
+        ClientMethod="put_object",
+        Params={
+            "Bucket": settings.S3_BUCKET_NAME,
+            "Key": s3_key,
+            "ContentType": "application/octet-stream",
+        },
+        ExpiresIn=300,  # 5 minutes
+    )
+
+    return {
+        "upload_url": url,
+        "s3_key": s3_key,
+    }
+
+@router.post("/confirm-upload")
+def confirm_upload(
+    s3_key: str,
+    background_tasks: BackgroundTasks,
+    db: Session = Depends(get_db),
+):
+    well = Well(
+        s3_key=s3_key,
+        is_ready=False,
+    )
+    db.add(well)
+    db.commit()
+    db.refresh(well)
+
+    background_tasks.add_task(
+        ingest_las_background,
+        s3_key,
+        well.id,
+    )
+
+    return {
+        "well_id": str(well.id),
+        "status": "processing",
+    }

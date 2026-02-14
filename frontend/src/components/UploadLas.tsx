@@ -11,27 +11,45 @@ const UploadLas: React.FC<Props> = ({ onUploaded, isCompact = false }) => {
 
   const handleUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     if (!e.target.files?.length) return;
+
+    const file = e.target.files[0];
     setLoading(true);
 
-    const formData = new FormData();
-    formData.append("file", e.target.files[0]);
-
     try {
-      const res = await api.post("/upload-las", formData, {
-        headers: { "Content-Type": "multipart/form-data" },
+      // 1️⃣ Ask backend for presigned URL
+      const presignRes = await api.post(
+        `/presign-upload?filename=${encodeURIComponent(file.name)}`
+      );
+
+      const { upload_url, s3_key } = presignRes.data;
+
+      // 2️⃣ Upload file directly to S3
+      await fetch(upload_url, {
+        method: "PUT",
+        body: file,
+        headers: {
+          "Content-Type": "application/octet-stream",
+        },
       });
-      onUploaded(res.data.well_id);
+
+      // 3️⃣ Tell backend upload is done (creates well + starts ingestion)
+      const confirmRes = await api.post("/confirm-upload", {
+        s3_key,
+      });
+
+      // 🔑 This well_id is what progress bar uses
+      onUploaded(confirmRes.data.well_id);
+
     } catch (err) {
+      console.error(err);
       alert("Upload failed.");
     } finally {
       setLoading(false);
     }
   };
 
-  // Inline styles to guarantee appearance
   const labelStyle: React.CSSProperties = isCompact
     ? {
-        // Compact Style (Dashboard Header)
         display: "inline-flex",
         alignItems: "center",
         padding: "0.5rem 1rem",
@@ -40,10 +58,9 @@ const UploadLas: React.FC<Props> = ({ onUploaded, isCompact = false }) => {
         cursor: "pointer",
         color: "#646cff",
         fontSize: "0.9rem",
-        backgroundColor: "transparent"
+        backgroundColor: "transparent",
       }
     : {
-        // Big Style (Center Screen)
         display: "inline-block",
         padding: "1rem 2rem",
         backgroundColor: "#646cff",
@@ -52,18 +69,24 @@ const UploadLas: React.FC<Props> = ({ onUploaded, isCompact = false }) => {
         cursor: "pointer",
         fontSize: "1.1rem",
         fontWeight: "bold",
-        boxShadow: "0 4px 15px rgba(100, 108, 255, 0.4)"
+        boxShadow: "0 4px 15px rgba(100, 108, 255, 0.4)",
       };
 
   return (
-    <div style={{ display: 'inline-block' }}>
+    <div style={{ display: "inline-block" }}>
       <label style={labelStyle}>
-        <span>{loading ? "Uploading..." : isCompact ? "Change File" : "📁 Upload LAS File"}</span>
-        <input 
-          type="file" 
-          accept=".las" 
-          onChange={handleUpload} 
-          style={{ display: "none" }} 
+        <span>
+          {loading
+            ? "Uploading..."
+            : isCompact
+            ? "Change File"
+            : "📁 Upload LAS File"}
+        </span>
+        <input
+          type="file"
+          accept=".las"
+          onChange={handleUpload}
+          style={{ display: "none" }}
           disabled={loading}
         />
       </label>
