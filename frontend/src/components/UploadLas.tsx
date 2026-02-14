@@ -17,14 +17,12 @@ const UploadLas: React.FC<Props> = ({ onUploaded, isCompact = false }) => {
 
     try {
       // 1️⃣ Ask backend for presigned URL
-      const presignRes = await api.post(
-        `/presign-upload?filename=${encodeURIComponent(file.name)}`
-      );
+      const presign = await api.post("/presign-upload", null, {
+        params: { filename: file.name },
+      });
 
-      const { upload_url, s3_key } = presignRes.data;
 
-      // 2️⃣ Upload file directly to S3
-      await fetch(upload_url, {
+      await fetch(presign.data.upload_url, {
         method: "PUT",
         body: file,
         headers: {
@@ -32,13 +30,15 @@ const UploadLas: React.FC<Props> = ({ onUploaded, isCompact = false }) => {
         },
       });
 
-      // 3️⃣ Tell backend upload is done (creates well + starts ingestion)
-      const confirmRes = await api.post("/confirm-upload", {
-        s3_key,
+
+      const confirm = await api.post("/confirm-upload", {
+        s3_key: presign.data.s3_key,
       });
 
+      onUploaded(confirm.data.well_id);
+
       // 🔑 This well_id is what progress bar uses
-      onUploaded(confirmRes.data.well_id);
+      
 
     } catch (err) {
       console.error(err);

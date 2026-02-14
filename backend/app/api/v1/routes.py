@@ -3,6 +3,8 @@ from sqlalchemy.orm import Session
 import uuid
 import boto3
 from app.core.config import settings
+from fastapi import Query
+from app.services.s3 import generate_presigned_upload_url
 
 
 from app.db.session import get_db
@@ -195,40 +197,36 @@ def chat_with_well(
     return {"answer": answer, "conversation_id": conv_id}
 
 @router.post("/presign-upload")
-def presign_upload(filename: str):
-    s3 = boto3.client(
-        "s3",
-        aws_access_key_id=settings.AWS_ACCESS_KEY_ID,
-        aws_secret_access_key=settings.AWS_SECRET_ACCESS_KEY,
-        region_name=settings.AWS_REGION,
-    )
-
+def presign_upload(filename: str = Query(...)):
     s3_key = f"las/{uuid.uuid4()}-{filename}"
 
-    url = s3.generate_presigned_url(
-        ClientMethod="put_object",
-        Params={
-            "Bucket": settings.S3_BUCKET_NAME,
-            "Key": s3_key,
-            "ContentType": "application/octet-stream",
-        },
-        ExpiresIn=300,  # 5 minutes
+    upload_url = generate_presigned_upload_url(
+        bucket_name="one-geo-assignment-las-files",
+        key=s3_key,
+        content_type="application/octet-stream",
     )
 
     return {
-        "upload_url": url,
+        "upload_url": upload_url,
         "s3_key": s3_key,
     }
 
+
+from pydantic import BaseModel
+
+class ConfirmUploadRequest(BaseModel):
+    s3_key: str
+
 @router.post("/confirm-upload")
 def confirm_upload(
-    s3_key: str,
+    body: ConfirmUploadRequest,
     background_tasks: BackgroundTasks,
     db: Session = Depends(get_db),
 ):
     well = Well(
-        s3_key=s3_key,
+        s3_key=body.s3_key,
         is_ready=False,
+        progress=0,
     )
     db.add(well)
     db.commit()
@@ -236,7 +234,7 @@ def confirm_upload(
 
     background_tasks.add_task(
         ingest_las_background,
-        s3_key,
+        body.s3_key,
         well.id,
     )
 
