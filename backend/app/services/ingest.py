@@ -1,8 +1,10 @@
 import uuid
 import tempfile
-import math
+import numpy as np
+import pandas as pd
 import lasio
 from sqlalchemy.orm import Session
+from sqlalchemy import text
 
 from app.models.well import Well
 from app.models.curve import Curve, CurveData
@@ -10,115 +12,138 @@ from app.services.s3 import get_s3_client, upload_file
 from app.core.config import settings
 from app.db.session import SessionLocal
 
-
-SKIP_CURVES = {"DEPT", "DEPTH", "TIME"}
-MIN_VALID_POINTS = 100
-BATCH_SIZE = 5000
-
+SKIP_CURVES = ["DEPT", "DEPTH", "TIME"]
+BATCH_SIZE = 10000  # Increased batch size for speed
 
 def parse_and_store_las(s3_key: str, well_id, db: Session):
     s3 = get_s3_client()
 
     # ===============================
-    # 1️⃣ Download LAS
+    # 1️⃣ Download & Read LAS (Fast)
     # ===============================
-    with tempfile.NamedTemporaryFile() as tmp:
+    with tempfile.NamedTemporaryFile(suffix=".las") as tmp:
         s3.download_file(settings.S3_BUCKET_NAME, s3_key, tmp.name)
+        # read_policy='default' is faster usually
         las = lasio.read(tmp.name)
 
-    depths = las.index
-    null_value = las.well.NULL.value
+    # Convert to Pandas DataFrame immediately (Much faster than iterating)
+    df = las.df()
+    
+    # Clean up standard null values (Lasio usually handles this, but safety first)
+    df = df.replace([las.well.NULL.value], np.nan)
 
-    # ===============================
-    # 2️⃣ Initialize well metadata
-    # ===============================
+    # Get depth column (index) into the dataframe as a column
+    df = df.rename_axis("DEPTH").reset_index()
+
+    # Update Well Metadata
     well = db.query(Well).filter(Well.id == well_id).first()
-
-    well.min_depth = float(las.well.STRT.value)
-    well.max_depth = float(las.well.STOP.value)
-
-    valid_curves = [
-        c for c in las.curves
-        if c.mnemonic.strip().upper() not in SKIP_CURVES
+    well.min_depth = float(df["DEPTH"].min())
+    well.max_depth = float(df["DEPTH"].max())
+    
+    # Identify valid curves (columns that are not depth and not in skip list)
+    valid_columns = [
+        col for col in df.columns 
+        if col.upper() not in SKIP_CURVES 
+        and col != "DEPTH"
     ]
-
-    well.total_curves = len(valid_curves)
+    
+    well.total_curves = len(valid_columns)
     well.processed_curves = 0
-    well.progress = 0.0
-
     db.commit()
 
     # ===============================
-    # 3️⃣ Ingest curves (FAST PATH)
+    # 2️⃣ Create Curve Metadata
     # ===============================
-    with db.no_autoflush:
-        for curve in valid_curves:
-            mnemonic = curve.mnemonic.strip().upper()
-            values = las[mnemonic]
+    # Create all Curve objects first to get their IDs
+    curve_name_to_id = {}
+    
+    curves_to_add = []
+    for col_name in valid_columns:
+        # Check if column has actual data (not all NaNs)
+        if df[col_name].isna().all():
+            continue
+            
+        unit = las.curves[col_name].unit if col_name in las.curves else ""
+        curve_obj = Curve(
+            well_id=well_id,
+            name=col_name,
+            unit=unit
+        )
+        curves_to_add.append(curve_obj)
 
-            clean_values = [
-                float(v)
-                for v in values
-                if v is not None
-                and v != null_value
-                and not math.isnan(v)
-            ]
+    if not curves_to_add:
+        well.is_ready = True
+        well.progress = 100
+        db.commit()
+        return
 
-            # 🚫 Skip junk curves
-            if len(clean_values) < MIN_VALID_POINTS:
-                continue
+    db.add_all(curves_to_add)
+    db.flush() # Generates IDs without committing transaction
 
-            if max(clean_values) == min(clean_values):
-                continue
+    # Create a map: {'GR': 5, 'RES': 6}
+    for c in curves_to_add:
+        curve_name_to_id[c.name] = c.id
 
-            curve_obj = Curve(
-                well_id=well_id,
-                name=mnemonic,
-                unit=curve.unit,
-            )
-            db.add(curve_obj)
-            db.flush()  # get curve_obj.id
+    # ===============================
+    # 3️⃣ Prepare Data (Vectorized Melt)
+    # ===============================
+    # This turns Wide format (Depth, GR, RES) -> Long format (Depth, CurveName, Value)
+    # This is 100x faster than a Python for-loop
+    df_long = df.melt(
+        id_vars=["DEPTH"], 
+        value_vars=[c.name for c in curves_to_add],
+        var_name="curve_name", 
+        value_name="value"
+    )
 
-            rows = []
+    # Remove NaNs to save DB space
+    df_long = df_long.dropna(subset=["value"])
 
-            for depth, value in zip(depths, values):
-                rows.append(
-                    {
-                        "curve_id": curve_obj.id,
-                        "depth": float(depth),
-                        "value": None
-                        if value in (None, null_value)
-                        else float(value),
-                    }
-                )
+    # Map curve names to IDs
+    # We use map() which is very fast in Pandas
+    df_long["curve_id"] = df_long["curve_name"].map(curve_name_to_id)
 
-                if len(rows) >= BATCH_SIZE:
-                    db.bulk_insert_mappings(CurveData, rows)
-                    rows.clear()
+    # Rename columns to match SQLAlchemy model
+    df_long = df_long.rename(columns={"DEPTH": "depth"})
+    
+    # Keep only relevant columns
+    final_data = df_long[["curve_id", "depth", "value"]].to_dict("records")
 
-            if rows:
-                db.bulk_insert_mappings(CurveData, rows)
-
-            # ✔ Commit ONCE per curve
+    total_rows = len(final_data)
+    
+    # ===============================
+    # 4️⃣ Batch Insert
+    # ===============================
+    # Insert in chunks of 10,000
+    for i in range(0, total_rows, BATCH_SIZE):
+        batch = final_data[i : i + BATCH_SIZE]
+        db.bulk_insert_mappings(CurveData, batch)
+        
+        # Update progress based on ROWS inserted, not just curves
+        # This makes the progress bar smoother
+        progress_pct = int((i / total_rows) * 100)
+        
+        # Only update DB if progress changed significantly (every 5%)
+        # to prevent locking the DB row constantly
+        if progress_pct % 5 == 0:
+            well.progress = progress_pct
+            # Also update processed_curves roughly
+            well.processed_curves = int((progress_pct / 100) * well.total_curves)
+            db.commit()
+        else:
+            # Commit the data insert anyway to free up memory
             db.commit()
 
-            # ===============================
-            # 4️⃣ Progress update
-            # ===============================
-            well.processed_curves += 1
-            well.progress = (
-                well.processed_curves / well.total_curves
-            ) * 100.0
-            db.commit()
-
     # ===============================
-    # 5️⃣ Finalize well
+    # 5️⃣ Finalize
     # ===============================
-    well.progress = 100.0
+    well.progress = 100
+    well.processed_curves = well.total_curves
     well.is_ready = True
     db.commit()
 
 
+# Keep these helpers the same
 def ingest_las_file(file, db: Session):
     s3_key = f"las/{uuid.uuid4()}.las"
     upload_file(file, s3_key)
@@ -142,5 +167,8 @@ def ingest_las_background(s3_key: str, well_id):
     db = SessionLocal()
     try:
         parse_and_store_las(s3_key, well_id, db)
+    except Exception as e:
+        print(f"Error processing LAS: {e}")
+        # Optionally mark well as failed in DB
     finally:
         db.close()
