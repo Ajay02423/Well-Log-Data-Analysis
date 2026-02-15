@@ -13,7 +13,7 @@ from app.core.config import settings
 from app.db.session import SessionLocal
 
 SKIP_CURVES = ["DEPT", "DEPTH", "TIME"]
-BATCH_SIZE = 50000  # Increased batch size for speed
+BATCH_SIZE = 10000  # Increased batch size for speed
 
 def parse_and_store_las(s3_key: str, well_id, db: Session):
     s3 = get_s3_client()
