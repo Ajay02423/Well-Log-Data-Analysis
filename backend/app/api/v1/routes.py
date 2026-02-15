@@ -240,13 +240,26 @@ def presign_upload(filename: str):
         "s3_key": s3_key,
     }
 
+from fastapi import APIRouter, UploadFile, File, Depends, BackgroundTasks, HTTPException
+from sqlalchemy.orm import Session
+from pydantic import BaseModel  # <--- Make sure this is imported
+import uuid
+import boto3
+from app.core.config import settings
+
+# ... (keep your existing imports and other code) ...
+
+# 1️⃣ Define the Schema for the request body
+class ConfirmUploadRequest(BaseModel):
+    s3_key: str
+
 @router.post("/confirm-upload")
 def confirm_upload(
-    body: ConfirmUploadRequest, # <--- Use the Pydantic Model here
+    body: ConfirmUploadRequest,  # <--- Use the schema here
     background_tasks: BackgroundTasks,
     db: Session = Depends(get_db),
 ):
-    # Access the data using body.s3_key
+    # 2️⃣ Access the key using 'body.s3_key'
     well = Well(
         s3_key=body.s3_key,
         is_ready=False,

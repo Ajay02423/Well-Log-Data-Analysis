@@ -10,32 +10,24 @@ const UploadLas: React.FC<Props> = ({ onUploaded, isCompact = false }) => {
   const [loading, setLoading] = useState(false);
 
   const handleUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    // 1. Basic validation
     if (!e.target.files?.length) return;
     const file = e.target.files[0];
 
-    // Reset input so the same file can be selected again if needed
+    // Reset input so you can select the same file again if it fails
     e.target.value = ""; 
 
     setLoading(true);
 
     try {
-      // ==========================================
-      // Step 1: Get Presigned URL
-      // ==========================================
-      // We encode the filename to handle spaces or special characters safely
+      // 1️⃣ Get Presigned URL
       const presignRes = await api.post(
         `/presign-upload?filename=${encodeURIComponent(file.name)}`
       );
 
       const { upload_url, s3_key } = presignRes.data;
 
-      // ==========================================
-      // Step 2: Upload to S3
-      // ==========================================
-      // IMPORTANT: Use standard 'fetch' here instead of 'api' (axios).
-      // Axios interceptors might add Authorization headers (Bearer token),
-      // which will cause AWS S3 to reject the upload with a 403 or 400 error.
+      // 2️⃣ Upload to S3
+      // Use standard fetch to avoid sending Auth headers to AWS
       const s3Response = await fetch(upload_url, {
         method: "PUT",
         body: file,
@@ -45,31 +37,25 @@ const UploadLas: React.FC<Props> = ({ onUploaded, isCompact = false }) => {
       });
 
       if (!s3Response.ok) {
-        throw new Error(`S3 Upload failed: ${s3Response.statusText}`);
+        throw new Error("Failed to upload to S3");
       }
 
-      // ==========================================
-      // Step 3: Confirm with Backend
-      // ==========================================
-      // FIX: Your backend expects 's3_key' as a query parameter (in the URL).
-      // sending it in the body {} would cause a 422 error.
-      const confirmRes = await api.post(
-        `/confirm-upload?s3_key=${encodeURIComponent(s3_key)}`
-      );
+      // 3️⃣ Confirm with Backend
+      // SEND AS JSON BODY (matches the Pydantic model in backend)
+      const confirmRes = await api.post("/confirm-upload", {
+        s3_key: s3_key, 
+      });
 
-      // Pass the new well ID back to the parent component
       onUploaded(confirmRes.data.well_id);
 
     } catch (err: any) {
-      console.error("Upload process failed:", err);
-      // Show a more specific error message if available
-      alert(err.response?.data?.detail || err.message || "Upload failed.");
+      console.error(err);
+      alert(err.response?.data?.detail || "Upload failed");
     } finally {
       setLoading(false);
     }
   };
 
-  // Styles based on 'isCompact' prop
   const labelStyle: React.CSSProperties = isCompact
     ? {
         display: "inline-flex",
