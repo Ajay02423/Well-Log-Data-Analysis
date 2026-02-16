@@ -169,14 +169,18 @@ const LogViewer: React.FC<Props> = ({
         {interpretation && (
           <div
             style={{
-              background: "#f5f5f5",
+              background: "#F1F5F9",
+              color: "#1F2937",
               padding: 15,
-              borderRadius: 6,
+              borderRadius: 8,
             }}
           >
-            <ReactMarkdown>{normalizeText(interpretation)}</ReactMarkdown>
+            <ReactMarkdown>
+              {normalizeText(interpretation)}
+            </ReactMarkdown>
           </div>
         )}
+
       </div>
     </div>
   );
