@@ -72,7 +72,7 @@
 }
 
 .assistant .chat-bubble {
-  background: rgba(0, 240, 64, 0.1);
+  background: rgb(3, 250, 69);
   color: rgb(0, 0, 0);
   border: 1px solid rgba(255, 255, 255, 0.1);
   border-bottom-left-radius: 2px;
