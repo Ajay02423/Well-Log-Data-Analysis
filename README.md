@@ -1,10 +1,10 @@
 # One-Geo Well-Log Data Analysis System
 
-## 📋 Overview
+##  Overview
 
 A full-stack web application for ingesting, storing, visualizing, and performing AI-assisted interpretation on LAS (Log ASCII Standard) well-log data. This system enables users to upload geological data, visualize various curves against depth, and get AI-powered insights using large language models.
 
-## 🎯 Features
+##  Features
 
 - **LAS File Ingestion**: Upload and process `.las` files with background processing.
 - **Dual Storage**: Original files in Amazon S3 and structured data in PostgreSQL.
@@ -13,7 +13,7 @@ A full-stack web application for ingesting, storing, visualizing, and performing
 - **AI Chatbot**: Conversational interface to ask data-driven questions about the well logs.
 - **Real-time Progress**: Background task tracking for data ingestion.
 
-## 🧠 Approach & Design Decisions
+##  Approach & Design Decisions
 
 ### 1. Architecture
 *   **Separation of Concerns**: The system follows a clear client-server architecture. The **FastAPI** backend handles data processing, storage orchestration, and AI integration, while the **React** frontend provides a responsive user interface.
