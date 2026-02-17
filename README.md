@@ -134,4 +134,8 @@ docker-compose up --build
 - **AI Interpretation**: `POST /api/v1/interpret`
 - **Chatbot**: `POST /api/v1/chat`
 
+## Deployment
+
+Deployed on: https://one-geo-assignment-9xm5.vercel.app/
+(May not load on restricted institutional networks)
 ---
