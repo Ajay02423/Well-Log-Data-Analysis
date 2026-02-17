@@ -13,6 +13,40 @@ A full-stack web application for ingesting, storing, visualizing, and performing
 - **AI Chatbot**: Conversational interface to ask data-driven questions about the well logs.
 - **Real-time Progress**: Background task tracking for data ingestion.
 
+## 🧠 Approach & Design Decisions
+
+### 1. Architecture
+*   **Separation of Concerns**: The system follows a clear client-server architecture. The **FastAPI** backend handles data processing, storage orchestration, and AI integration, while the **React** frontend provides a responsive user interface.
+*   **API-First Design**: Communication happens via a well-defined REST API. This ensures that the frontend never interacts directly with the database or S3 credentials, maintaining a secure boundary.
+*   **Security**: Sensitive AWS and AI credentials are kept strictly on the server-side within the backend's environment variables. The frontend uses **S3 Presigned URLs** to upload files directly to S3 without exposing secret keys.
+
+### 2. File Ingestion & Storage Strategy
+*   **Two-Phase Upload**: 
+    1.  Frontend requests a presigned URL from the backend.
+    2.  Frontend uploads the `.las` file directly to the **Amazon S3** bucket.
+    3.  Backend is notified to start processing.
+*   **Processing Pipeline**: The backend uses the `lasio` library to parse the Log ASCII Standard file. 
+*   **Database Choice: PostgreSQL**: 
+    *   **Justification**: PostgreSQL was chosen for its reliability, support for structured relational data (well metadata, curve definitions), and its ability to efficiently store and query large time-series/depth-series data using standard SQL. It allows for complex queries when filtering by depth ranges and curves.
+*   **Storage Strategy**: 
+    *   **Original Files**: Kept in S3 for archival and re-processing.
+    *   **Parsed Data**: Curve data (e.g., GR, NPHI, RHOB) is stored in a structured format in PostgreSQL, indexed by `well_id` and `depth` to enable high-performance retrieval for visualization.
+
+### 3. Visualization Approach
+*   **Interactive Engine**: Uses **Plotly.js** due to its superior support for scientific charting, built-in zoom/pan capabilities, and ability to handle large datasets.
+*   **Dynamic Loading**: Instead of loading the entire log at once, the frontend requests specific curves and depth ranges via the `/api/v1/query` endpoint, ensuring the UI remains performant even for deep wells.
+
+### 4. AI-Assisted Interpretation
+*   **Technique**: Large Language Models (LLMs) from **Hugging Face** or **OpenAI** are used to perform geological analysis.
+*   **Process**: 
+    1.  The user selects a depth range and curves (e.g., Gamma Ray and Resistivity).
+    2.  The backend extracts the statistical summary and raw data for that range.
+    3.  A prompt is constructed with the log data and sent to the AI model.
+    4.  **Insights**: The AI provides lithology interpretation, identifies potential pay zones, and highlights anomalies in the well-log trends.
+
+### 5. Chatbot Interface
+*   **Conversational Data Analysis**: A dedicated chatbot allows users to ask natural language questions (e.g., \"What is the average Gamma Ray between 1000m and 1200m?\"). It combines the power of LLMs with structured data queries to provide real-time answers based on the uploaded well data.
+
 ## 🏗️ Architecture
 
 - **Backend**: FastAPI (Python 3.11)
@@ -46,23 +80,22 @@ A full-stack web application for ingesting, storing, visualizing, and performing
 - Hugging Face / OpenAI API Key
 
 ### 1. Backend Setup
-
 ```bash
 cd backend
 python -m venv venv
-source venv/bin/activate  # Windows: venv\Scripts\activate
+source venv/bin/activate  # Windows: venv\\Scripts\\activate
 pip install -r requirements.txt
 ```
 
 **Environment Variables (`backend/.env`):**
-```env
+```bash
 DATABASE_URL=postgresql://user:password@localhost:5432/well_db
 AWS_ACCESS_KEY_ID=your_key
 AWS_SECRET_ACCESS_KEY=your_secret
 AWS_REGION=us-east-1
 S3_BUCKET_NAME=your_bucket
 HF_API_TOKEN=your_token
-OPENAI_API_KEY=your_key  # Optional
+OPENAI_API_KEY=your_key # Optional
 ```
 
 **Run Server:**
@@ -71,14 +104,13 @@ uvicorn app.main:app --reload --port 8000
 ```
 
 ### 2. Frontend Setup
-
 ```bash
 cd frontend
 npm install
 ```
 
 **Environment Variables (`frontend/.env`):**
-```env
+```bash
 VITE_API_URL=http://localhost:8000
 ```
 
@@ -88,7 +120,6 @@ npm run dev
 ```
 
 ### 3. Docker Setup (Alternative)
-
 ```bash
 docker-compose up --build
 ```
