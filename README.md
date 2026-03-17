@@ -1,4 +1,4 @@
-# One-Geo Well-Log Data Analysis System
+# Well-Log Data Analysis System
 
 ##  Overview
 
